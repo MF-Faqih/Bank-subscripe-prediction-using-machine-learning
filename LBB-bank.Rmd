@@ -1,0 +1,394 @@
+---
+title: "LBB-ML2"
+author: "MF-Faqih"
+date: "2023-03-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(lubridate)
+library(e1071) #package naivebayes
+library(caret) #package for resemple train data
+library(partykit) #package for ctree function
+library(ROCR) #Package for AUC
+library(randomForest)
+library(caret) #K-fold
+```
+
+
+```{r}
+bank <- read.csv("bank-full.csv", sep = ";", stringsAsFactors = T)
+head(bank)
+```
+
+Column description:
+1 - age (numeric)
+2 - job : type of job (categorical: "admin.","unknown","unemployed","management","housemaid","entrepreneur","student",
+                                    "blue-collar","self-employed","retired","technician","services") 
+3 - marital : marital status (categorical: "married","divorced","single"; note: "divorced" means divorced or widowed)
+4 - education (categorical: "unknown","secondary","primary","tertiary")
+5 - default: has credit in default? (binary: "yes","no")
+6 - balance: average yearly balance, in euros (numeric) 
+7 - housing: has housing loan? (binary: "yes","no")
+8 - loan: has personal loan? (binary: "yes","no")
+
+# related with the last contact of the current campaign:
+9 - contact: contact communication type (categorical: "unknown","telephone","cellular") 
+10 - day: last contact day of the month (numeric)
+11 - month: last contact month of year (categorical: "jan", "feb", "mar", ..., "nov", "dec")
+12 - duration: last contact duration, in seconds (numeric)
+
+# other attributes:
+13 - campaign: number of contacts performed during this campaign and for this client (numeric, includes last contact)
+14 - pdays: number of days that passed by after the client was last contacted from a previous campaign (numeric, -1 means client was not previously contacted)
+15 - previous: number of contacts performed before this campaign and for this client (numeric)
+16 - poutcome: outcome of the previous marketing campaign (categorical: "unknown","other","failure","success")
+
+Output variable (desired target):
+17 - y - has the client subscribed a term deposit? (binary: "yes","no")
+
+```{r}
+glimpse(bank)
+```
+
+```{r}
+summary(bank)
+```
+
+```{r}
+table(bank$month)
+```
+
+
+Column that has high  unknown value:
+1. poutcome -> 36959
+2. job -> 288
+3. education -> 1857
+4. contact -> 13020
+
+I'll drop poutcome and contact column which both column has too much missing values
+
+```{r}
+bank_clean <- bank %>% 
+  select(-c(poutcome, contact))
+```
+
+```{r}
+bank_clean <- bank_clean %>% 
+  filter(job != "unknown",
+         education != "unknown")
+```
+
+```{r}
+(45211-43193)/nrow(bank)
+```
+All missing value has less than 5% of total data, so it's will not influencing analysis result
+
+
+#NAIVE BAYES MODEL
+```{r}
+bank_naive <- bank_clean
+```
+
+
+Naive bayes model good when all the predictor is categoric data type, 
+create age_range column
+
+```{r}
+p <- function(x){
+  if (x >= 18 & x <= 25 ){
+    y <- "18 - 25"
+  }
+  else if (x >= 26 & x <= 30){
+    y <- "26 - 30"
+  }
+  else if (x >= 31 & x <= 35){
+    y <- "31 - 35"
+  }
+  else if (x >= 36 & x <= 40){
+    y <- "36 - 40"
+  }
+  else if (x >= 41 & x <= 45){
+    y <- "41 - 50"
+  }
+  else if (x >= 46 & x <= 50){
+    y <- "46 - 50"
+  }
+  else if (x >= 51 & x <= 55){
+    y <- "51 - 55"
+  }
+  else if (x >= 56 & x <= 60){
+    y <- "56 - 60"
+  }
+  else if (x >= 61 & x <= 65){
+    y <- "61 - 65"
+  }
+  else if (x >= 66 & x <= 70){
+    y <- "65 - 70"
+  }
+  else if (x >= 71 & x <= 75){
+    y <- "71 - 75"
+  }
+  else if (x >= 76 & x <= 70){
+    y <- "76 - 70"
+  }
+  else if (x >= 71 & x <= 75){
+    y <- "71 - 76"
+  }
+  else if (x >= 76 & x <= 80){
+    y <- "76 - 80"
+  }
+  else if (x >= 81 & x <= 85){
+    y <- "81 - 85"
+  }
+  else if (x >= 86 & x <= 90){
+    y <- "86 - 90"
+  }
+  else {
+    y <- "91 - 95"
+  }
+  
+  return(y)
+}
+
+bank_naive$age_range <- as.factor(sapply(bank_naive$age, FUN = p))
+```
+
+```{r}
+get_range <- function(x) {
+  if (x < 0) {
+    return("negative")
+  } else if (x < 5000) {
+    return("low")
+  } else if (x < 10000) {
+    return("medium")
+  } else {
+    return("high")
+  }
+}
+
+bank_naive$balance_range <- as.factor(sapply(bank_naive$balance, get_range))
+```
+
+```{r}
+summary(bank_naive)
+```
+
+#BUILD NAIVE BAYES MODEL
+```{r}
+#drop day column as it represented by month column, and remove other numeric column
+
+bank_naive <- bank_naive %>% 
+  select(-c(age, balance))
+
+head(bank_naive)
+```
+
+```{r}
+RNGkind(sample.kind = "Rounding")
+set.seed(123)
+
+index <- sample(nrow(bank_naive), nrow(bank_naive)*0.8)
+
+naive_train <- bank_naive[index,]
+naive_test <- bank_naive[-index,]
+```
+
+```{r}
+table(naive_train$y)
+```
+
+```{r}
+naive_train_up <- upSample(x = naive_train %>% select(-y), y = naive_train$y, yname = "y")
+```
+
+```{r}
+table(naive_train_up$y)
+```
+
+
+```{r}
+model_naive <- naiveBayes(y ~ ., naive_train_up, leplace = 1)
+
+bank_predict <- predict(model_naive, naive_test)
+
+confusionMatrix(bank_predict, naive_test$y, positive = "yes")
+```
+
+```{r}
+bank_train <- predict(model_naive, naive_train)
+
+confusionMatrix(bank_train, naive_train$y, positive = "yes")
+```
+
+
+Model summary:
+- Accuracy: both data train and test has 79% accuracy (model has good fit)
+- Sensitivity: 77%
+- Pos Pred Value: 33%
+
+For further model improvemnet, better to higher Sensitivity value
+
+
+
+#CTRE MODEL
+```{r}
+RNGkind(sample.kind = "Rounding")
+set.seed(123)
+
+index <- sample(nrow(bank_clean), nrow(bank_clean)*0.8)
+
+bank_train <- bank_naive[index,]
+bank_test <- bank_naive[-index,]
+```
+
+```{r}
+table(bank_train$y)
+```
+
+```{r}
+bank_train_up <- upSample(x = bank_train %>% select(-y), y = bank_train$y, yname = "y")
+```
+
+```{r}
+table(bank_train_up$y)
+```
+#Model without tuning parameter
+```{r}
+bank_tree <- ctree(formula = y ~ ., data = bank_train_up)
+nilai <- ctree_control()
+print(ctree_control())
+#minciriterion = 0.05
+#minsplit = 20
+#minbucket = 7
+```
+
+```{r}
+bank_tree_predict <- predict(bank_tree, bank_test, type = "response")
+
+confusionMatrix(bank_tree_predict, bank_test$y, positive = "yes")
+```
+
+```{r}
+bank_tree_trrain_predict <- predict(bank_tree, bank_train, type = "response")
+
+confusionMatrix(bank_tree_trrain_predict, bank_train$y, positive = "yes")
+```
+
+#Model with tuning parameter
+```{r}
+bank_tree_tuning <- ctree(formula = y ~ ., data = bank_train_up,
+                          control = ctree_control(mincriterion = 0.05,
+                                                  minsplit = 40,
+                                                  minbucket = 30))
+```
+
+```{r}
+predict_tuning <- predict(bank_tree_tuning, bank_test, type = "response")
+
+confusionMatrix(predict_tuning, bank_test$y, positive = "yes")
+```
+
+```{r}
+trrain_predict_tunig <- predict(bank_tree_tuning, bank_train, type = "response")
+
+confusionMatrix(trrain_predict_tunig, bank_train$y, positive = "yes")
+```
+#AUC test
+```{r}
+roc_test <- predict(bank_tree_tuning, bank_test, type = "prob")
+
+head(roc_test)
+```
+
+```{r}
+#subset only positive class
+pred_prob <- roc_test[,2]
+
+#predict
+model_roc <- prediction(pred_prob, bank_test$y)
+```
+
+```{r}
+# performance
+model_auc <- performance(model_roc, 
+                             "tpr", # True Positive Rate (Recall)
+                             "fpr" # False Positive Rate (1 - Specificity)
+                             )
+# buat plot
+plot(model_auc)
+
+abline(0,1 , lty = 2)
+```
+
+```{r}
+#AUC value
+auc_value <- performance(model_roc, measure = "auc")@y.values
+
+auc_value
+```
+
+
+Model summary:
+- Tuning model have better accury and sensitivity value than non tuning model
+- Neither over nor under fitting detected (train data has accuracy not bigger than 10% of test data)
+- Accuracy: 83%
+- Sensitivity: 80%
+- Decision tree model have better performance than naive bayes model
+- AUC test shows area under ROC curve is 88% (closer to 1), which indicates that the model can differentiate negative and positive class well
+
+
+
+#RANDOM FOREST
+```{r}
+#Eleminatin column that has least contribution into target variable based on its low variance
+zero_var <- nearZeroVar(bank_clean)
+
+zero_var
+```
+
+```{r}
+#Select only column with high variance
+bank_cleanest <- bank_clean %>% 
+  select(-zero_var)
+```
+
+```{r}
+#set.seed(417)
+
+#Determining K number
+#ctrl <- trainControl(method = "repeatedcv",
+#                      number = 5, # k-fold
+#                      repeats = 3) # repetition
+
+
+#Train random forest model
+#fb_forest <- train(y ~ .,
+#                    data = bank_train,
+#                    method = "rf", # random forest
+#                    trControl = ctrl)
+
+#saveRDS(fb_forest, "bank_forest.RDS")
+```
+
+```{r}
+bank_forest <- readRDS("bank_forest.RDS")
+```
+
+```{r}
+bank_forest$finalModel
+```
+
+```{r}
+bank_predict_forest <- predict(bank_forest, newdata = bank_test)
+
+confusionMatrix(bank_predict_forest, bank_test$y)
+```
+
+Conclusion:
+- From all three models, random forest has the highest both accuracy and sensitivity value, 90% and 96% respectively.
